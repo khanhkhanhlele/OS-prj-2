@@ -1,115 +1,125 @@
-#include <stdio.h>
+#include <pthread.h>
 #include <stdlib.h>
+#include <assert.h>
 #include <unistd.h>
+#include <stdio.h>
+#include <stdbool.h>
+#include <semaphore.h>
 
-
-//
-// Your code goes in the structure and functions below
-//
-
-
-// Starvation-Problem wird deutlich durch hohe Anzahl von
-// Readern, Writer erst möglich wenn alle Reader fertig sind.
-
-typedef struct __rwlock_t {
-  sem_t lock;
-  sem_t writelock;
-  int readers;
-} rwlock_t;
-
-
-void rwlock_init(rwlock_t *rw) {
-  rw->readers = 0;
-  sem_init(&rw->lock, 0, 1);
-  sem_init(&rw->writelock, 0, 1);
+pthread_t *CreateThread(void *(*f)(void *), void *a)
+{
+	pthread_t *t = malloc(sizeof(pthread_t));
+	assert(t != NULL);
+	int ret = pthread_create(t, NULL, f, a);
+	assert(ret == 0);
+	return t;
 }
 
-void rwlock_acquire_readlock(rwlock_t *rw) {
-  sleep(2);
-  sem_wait(&rw->lock);
-  rw->readers++;
-  if (rw->readers == 1)
-  {
-    sleep(2);
-    sem_wait(&rw->writelock);
-  }
-  sem_post(&rw->lock);
+static const int N_ELVES = 10;
+static const int N_REINDEER = 9;
+
+static int elves;
+static int reindeer;
+static sem_t santaSem;
+static sem_t reindeerSem;
+static sem_t elfTex;
+static sem_t mutex;
+
+void *SantaClaus(void *arg)
+{
+	printf("Santa Claus: Hoho, here I am\n");
+	while (true)
+	{
+		sem_wait(&santaSem);
+		sem_wait(&mutex);
+		if (reindeer == N_REINDEER)
+		{
+			printf("Santa Claus: preparing sleigh\n");
+			for (int r = 0; r < N_REINDEER; r++)
+				sem_post(&reindeerSem);
+			printf("Santa Claus: make all kids in the world happy\n");
+			reindeer = 0;
+		}
+		else if (elves == 3)
+		{
+			printf("Santa Claus: helping elves\n");
+		}
+		sem_post(&mutex);
+	}
+	return arg;
 }
 
-void rwlock_release_readlock(rwlock_t *rw) {
-  sleep(2);
-  sem_wait(&rw->lock);
-  rw->readers--;
-  if (rw->readers == 0)
-  {
-    sem_post(&rw->writelock);
-  }
-  sem_post(&rw->lock);
+void *Reindeer(void *arg)
+{
+	int id = (int)arg;
+	printf("This is reindeer %d\n", id);
+	while (true)
+	{
+		sem_wait(&mutex);
+		reindeer++;
+		if (reindeer == N_REINDEER)
+			sem_post(&santaSem);
+		sem_post(&mutex);
+		sem_wait(&reindeerSem);
+		printf("Reindeer %d getting hitched\n", id);
+		sleep(20);
+	}
+	return arg;
 }
 
-void rwlock_acquire_writelock(rwlock_t *rw) {
-  sleep(2);
-  sem_wait(&rw->writelock);
+void *Elve(void *arg)
+{
+	int id = (int)arg;
+	printf("This is elve %d\n", id);
+	while (true)
+	{
+		bool need_help = random() % 100 < 10;
+		if (need_help)
+		{
+			sem_wait(&elfTex);
+			sem_wait(&mutex);
+			elves++;
+			if (elves == 3)
+				sem_post(&santaSem);
+			else
+				sem_post(&elfTex);
+			sem_post(&mutex);
+
+			printf("Elve %d will get help from Santa Claus\n", id);
+			sleep(10);
+
+			sem_wait(&mutex);
+			elves--;
+			if (elves == 0)
+				sem_post(&elfTex);
+			sem_post(&mutex);
+		}
+		// Do some work
+		printf("Elve %d at work\n", id);
+		sleep(2 + random() % 5);
+	}
+	return arg;
 }
 
-void rwlock_release_writelock(rwlock_t *rw) {
-  sem_post(&rw->writelock);
-}
+int main(int ac, char **av)
+{
+	elves = 0;
+	reindeer = 0;
+	sem_init(&santaSem, 0, 0);
+	sem_init(&reindeerSem, 0, 0);
+	sem_init(&elfTex, 0, 1);
+	sem_init(&mutex, 0, 1);
 
-//
-// Don't change the code below (just use it!)
-//
+	pthread_t *santa_claus = CreateThread(SantaClaus, 0);
 
-int loops;
-int value = 0;
+	pthread_t *reindeers[N_REINDEER];
+	for (int r = 0; r < N_REINDEER; r++)
+		reindeers[r] = CreateThread(Reindeer, (void *)r + 1);
 
-rwlock_t lock;
+	pthread_t *elves[N_ELVES];
+	for (int e = 0; e < N_ELVES; e++)
+		elves[e] = CreateThread(Elve, (void *)e + 1);
 
-void *reader(void *arg) {
-    int i;
-    for (i = 0; i < loops; i++) {
-	rwlock_acquire_readlock(&lock);
-	printf("read %d\n", value);
-	rwlock_release_readlock(&lock);
-    }
-    return NULL;
-}
-
-void *writer(void *arg) {
-    int i;
-    for (i = 0; i < loops; i++) {
-	rwlock_acquire_writelock(&lock);
-	value++;
-	printf("write %d\n", value);
-	rwlock_release_writelock(&lock);
-    }
-    return NULL;
-}
-
-int main(int argc, char *argv[]) {
-    assert(argc == 4);
-    int num_readers = atoi(argv[1]);
-    int num_writers = atoi(argv[2]);
-    loops = atoi(argv[3]);
-
-    pthread_t pr[num_readers], pw[num_writers];
-
-    rwlock_init(&lock);
-
-    printf("begin\n");
-
-    int i;
-    for (i = 0; i < num_readers; i++)
-	Pthread_create(&pr[i], NULL, reader, NULL);
-    for (i = 0; i < num_writers; i++)
-	Pthread_create(&pw[i], NULL, writer, NULL);
-
-    for (i = 0; i < num_readers; i++)
-	Pthread_join(pr[i], NULL);
-    for (i = 0; i < num_writers; i++)
-	Pthread_join(pw[i], NULL);
-
-    printf("end: value %d\n", value);
-
-    return 0;
+	int ret = pthread_join(*santa_claus, NULL);
+	assert(ret == 0);
 }
