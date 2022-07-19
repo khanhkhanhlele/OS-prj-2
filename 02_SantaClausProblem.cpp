@@ -9,7 +9,7 @@
 
 
 // Starvation-Problem wird deutlich durch hohe Anzahl von
-// Readern, Writer erst möglich wenn alle Reader fertig sind.
+// Readern, Writer erst mÃ¶glich wenn alle Reader fertig sind.
 
 typedef struct __rwlock_t {
   sem_t lock;
