@@ -1,2 +1,2 @@
-#IT 3070 : Operation System
+# IT 3070 : Operation System
 # Project 2 Semaphore
